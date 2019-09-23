@@ -1,0 +1,435 @@
+---
+title: "Programa Futebol2"
+author: "Érika S. Machado"
+date: "13 de dezembro de 2018"
+output: html_document
+self_contained: true
+---
+
+Aqui nós faremos o estudo de análise de componentes principais para o resultados da Bundesliga de 2011 a 2017, que é o Campeonato da  primeira divisão do futebol alemão.  
+
+### Bibliotecas Utilizadas  
+
+
+```{r}
+library(rvest)
+library(tidyverse)
+library(knitr)
+library(reshape2)
+
+```
+
+
+# Tabelas  
+
+### Fazendo uma tabela para cada ano
+```{r}
+baixandotabela = function(x,b){
+  #Pegando a informação da internet
+  if (x <14){
+  a = paste0("https://pt.wikipedia.org/wiki/Bundesliga_de_20", x,"%E2%80%93",x+1)%>%  read_html() %>%
+      html_nodes(".toccolours")%>% html_table(fill = T)%>%.[[b]]}
+  else {
+    a = paste0("https://pt.wikipedia.org/wiki/Bundesliga_de_20", x,"%E2%80%93",x+1)%>%  read_html() %>%
+      html_nodes(".wikitable")%>% html_table(fill = T)%>%.[[b]]}
+  
+  ta = nrow(a)
+  
+  #Padronizando os nomes das variáveis
+  colnames(a)[1:11] = c("Pos","Equipes", "Pts",  "J",  "V",  "E",  "D",  "GM", "GS", "SG", "X." )  
+  a = a %>% 
+    select("Pos","Equipes", "Pts",  "J",  "V",  "GM", "SG")
+  
+  #Adicionando o Ano
+  da = data.frame(ANO = rep(x, ta), a)
+  da
+}
+
+```
+
+### Baixando as tabelas  
+
+```{r}
+
+tab2011 = baixandotabela(11,1)
+tab2012 = baixandotabela(12,1)
+tab2013 = baixandotabela(13,1)
+tab2014 = baixandotabela(14,2)
+tab2015 = baixandotabela(15,4)
+# Não foi possível usar o mesmo método para 2016
+setwd("~/Estatística/6º Semestre/Análise Multivariada/trabalho/CP- FUtebol")
+tab2016 = read.table("Alemão2016.txt", sep = ";", header = T) %>% 
+    select("Pos","Equipes", "Pts",  "J",  "V",  "GM", "SG")
+tab2016 = data.frame(ANO = rep(16, nrow(tab2016)), tab2016)
+
+kable(head(tab2011), caption = 'tab2011')
+kable(head(tab2012), caption = 'tab2012')
+kable(head(tab2013), caption = 'tab2013')
+kable(head(tab2014), caption = 'tab2014')
+kable(head(tab2015), caption = 'tab2015')
+kable(head(tab2016), caption = 'tab2016')
+
+```
+
+### Selecionando os times que participaram pelo menos de 5 campeonatos  
+
+```{r}
+#juntando todas as tabelas
+  todos = rbind(tab2011,tab2012,tab2013,tab2014,tab2015,tab2016)
+
+#Pelo menos 5 campeonatos
+tab = todos %>% 
+  select(Equipes) %>% 
+  table() %>% 
+  sort(decreasing = T) %>% 
+  as.data.frame() %>% 
+  filter(Freq >=5)
+colnames(tab)[1] = "Equipes"
+tab[,1]  = as.character(tab[,1])
+tab = tab %>% arrange(Equipes)
+kable(tab, caption = 'Equipes Selecionadas')
+
+```
+
+### Pegando os dados das equipes selecionadas de cada tabela  
+
+```{r}
+
+todosselecionado = lapply(tab$Equipes, function(x){ todos %>% 
+        arrange(Equipes, Pos) %>%
+        filter(Equipes == x)})
+todosselecionado
+todosselecionado = do.call(rbind, todosselecionado) %>%
+  mutate(Titulo = as.integer(Pos == 1)) 
+
+#Corrigindo a variável SG pois ao importar estava com caracteres especiais
+todosselecionado$SG = c(26,15,19,25,8,-2,80,71,62,61, 67,55,55,39,42,48,32,5,27,25,
+15,16,-4,-4,-11,-8,-28,-22,-24,-25,
+30,20,8,2,-1,5,-3,-9,-15,-24,
+-16,-17,3,-6,-7,-17,-17,-4,-2,-13,
+-17,-29,34,-2,-4,-5,-18)
+tab2012$J[6] = 34
+kable(head(todosselecionado), caption = 'Equipes Selecionadas')
+```
+
+### Montando a função TabelaFinal que nos dará as tabelas de temporadas  
+
+```{r}
+TabelaFinal = function(ano){ 
+  #Selecionando dados para a temporada
+  ta = todosselecionado %>% 
+  filter(ANO <=ano) %>% 
+    arrange(Equipes)
+  
+  #Adicionando uma coluna com a frequência que cada grupo aparece por temporada
+  Freq = ta %>% 
+    select(Equipes) %>%
+    table() 
+
+  #Agrupando os dados por equipe
+  quasefinal = aggregate(. ~ Equipes, ta, sum) %>%
+    mutate(Freq)
+
+  
+  #Fazendo as novas variáveis
+  tabela = quasefinal %>% 
+    mutate(AP = Pts/(3*J),
+           PV = V/J ,
+           PC = Freq/6,
+           MS = SG/J,
+           GJ= GM/J,
+           PP = Titulo/max(Freq)) 
+  
+  #Selecionando somente as variáveis que iremos utilizar na análise
+  rownames(tabela) = tabela$Equipes
+  if (ano == 11){
+    tabela = tabela %>%
+    select(AP,PV, MS,GJ,PP,PC) 
+    tabela[,1:5] = tabela[,1:5]%>% scale()
+    tabela = tabela %>% as.matrix()
+  } else {
+  tabela = tabela %>%
+    select(AP,PV, MS,GJ,PP,PC) %>% scale()}
+  
+  tabela}
+
+
+```
+
+### Aplicando a função TabelaFinal para conseguir os dados de cada temporada  
+
+```{r}
+T1 = TabelaFinal(11)
+T2 = TabelaFinal(12)
+T3 = TabelaFinal(13)
+T4 = TabelaFinal(14)
+T5 = TabelaFinal(15)
+T6 = TabelaFinal(16)
+
+```
+
+
+Sendo que  
+- AP = Aproveitamento (%) representa a porcentagem de pontos conquistados por cada equipe (calculado como sendo a pontuação obtida pelo time dividindo-se pelo máximos de pontos que  poderia ter conseguido, no caso como a vitória vale 3 pontos a pontuação máxima que uma equipe pode obter seria de 3 vezes o número de jogos disputados);  
+- PV - Proporção de Vitória - (calculada como sendo o número de vitórias que o time obteve dividido pelo número de jogos disputados);  
+- PC - Proporção de Campeonatos disputados (número de campeonatos que a equipe disputou dividido pelo número máximo, que no para efeito de nosso estudo serão seis);  
+- MS - Saldo de gols médio por jogo . (divide-se o saldo de gols que a equipe obteve pelo número de jogos disputados no período);  
+- GJ - Número médio de gols por partida (divide-se o número de gols marcados pelo time pela quantidade de partidas realizadas);  
+- PP - Proporção de títulos conquistados (número de títulos conquistados pelo clube dividido pelo máximo de títulos que ele poderia ter conquistado naquele período).  
+
+# Componentes principais  
+
+
+```{r}
+# Usando outra função sem ser a prcomp
+cpr = function(x){
+  v = var(x)
+  eigen(v)
+}
+```
+
+### Primeira temporada  
+
+```{r}
+cp1 = prcomp(T1)
+cp1
+summary(cp1)
+cpr1 = cpr(T1)
+```
+
+
+A primeira componente principal responde por cerca de 75,12% da variância total dos dados padronizados. Se pegarmos as duas primeiras componentes principais, conseguimos atingir 89,34% da variância total. 
+
+```{r}
+plot(1:6, cp1$sdev^2, type = "b", xlab = "Componente",
+ ylab = "Variância", pch = 20, cex.axis = 1.3, cex.lab = 1.3)
+
+```
+
+A seguir estão as correlações entre os dois primeiros componentes principais e as variáveis:  
+
+```{r}
+cp1$sdev[1:2]*t(cp1$rotation[,1:2])
+```
+
+O primeiro componente tem correlação forte com todas as variáveis, menos PC porque como estamos analisando somente uma temporada, essa variável ainda não se mostra significativa.  
+
+### Até Segunda temporada  
+
+```{r}
+cp2 = prcomp(T2)
+cp2
+summary(cp2)
+cpr2 = cpr(T2)
+```
+
+
+A primeira componente principal responde por 61,33% da variância total dos dados padronizados. Se pegarmos as duas primeiras componentes principais, conseguimos atingir 96,75% da variância total. 
+
+```{r}
+plot(1:6, cp2$sdev^2, type = "b", xlab = "Componente",
+ ylab = "Variância", pch = 20, cex.axis = 1.3, cex.lab = 1.3)
+
+```
+
+A seguir estão as correlações entre os dois primeiros componentes principais e as variáveis:  
+
+```{r}
+cp2$sdev[1:2]*t(cp2$rotation[,1:2])
+```
+
+O primeiro componente tem correlação forte com todas as variáveis.
+
+### Até Terceira temporada  
+
+```{r}
+cp3 = prcomp(T3)
+cp3
+summary(cp3)
+crp3 = cpr(T3)
+```
+
+
+A primeira componente principal responde por  75,31% da variância total dos dados padronizados. Se pegarmos as duas primeiras componentes principais, conseguimos atingir 92.62% da variância total.  
+
+```{r}
+plot(1:6, cp3$sdev^2, type = "b", xlab = "Componente",
+ ylab = "Variância", pch = 20, cex.axis = 1.3, cex.lab = 1.3)
+
+```
+
+A seguir estão as correlações entre os dois primeiros componentes principais e as variáveis:  
+
+```{r}
+cp3$sdev[1:2]*t(cp3$rotation[,1:2])
+```
+
+O primeiro componente tem correlação forte com todas as variáveis, menos PC que apresenta correlação negativa fraca.  Aqui já vemos a mudança no comportamento das correlações. Antes elas se apresentavam fortes e positivas, mas agora continua forte, porém com correlação negativa entre as componentes principais e as variáveis.  
+
+### Até Quarta temporada  
+
+```{r}
+cp4 = prcomp(T4)
+cp4
+summary(cp4)
+cpr4 = cpr(T4) #usar essa medida
+```
+
+
+A primeira componente principal responde por cerca de 75,46% da variância total dos dados padronizados. Se pegarmos as duas primeiras componentes principais, conseguimos atingir 93,85% da variância total.  
+
+```{r}
+plot(1:6, cp4$sdev^2, type = "b", xlab = "Componente",
+ ylab = "Variância", pch = 20, cex.axis = 1.3, cex.lab = 1.3)
+
+```
+
+A seguir estão as correlações entre os dois primeiros componentes principais e as variáveis:  
+```{r}
+cp4$sdev[1:2]*t(cp4$rotation[,1:2])
+```
+
+O primeiro componente tem correlação forte com todas as variáveis, menos PC que apresenta correlação negativa fraca.  
+
+### Até Quinta temporada  
+
+```{r}
+cp5 = prcomp(T5)
+cp5
+summary(cp5)
+cpr5 = cpr(T5)
+```
+
+
+A primeira componente principal responde por cerca de 76,39% da variância total dos dados padronizados. Se pegarmos as duas primeiras componentes principais, conseguimos atingir 93,65% da variância total.  
+
+```{r}
+plot(1:6, cp5$sdev^2, type = "b", xlab = "Componente",
+ ylab = "Variância", pch = 20, cex.axis = 1.3, cex.lab = 1.3)
+
+```
+
+A seguir estão as correlações entre os dois primeiros componentes principais e as variáveis:  
+
+```{r}
+cp5$sdev[1:2]*t(cp5$rotation[,1:2])
+```
+
+O primeiro componente tem correlação forte com todas as variáveis, menos PC que ainda possui correlação baixa.  
+
+### Até Sexta temporada  
+
+```{r}
+cp6 = prcomp(T6)
+cp6
+summary(cp6)
+cpr6 = cpr(T6)
+```
+
+
+A primeira componente principal responde por cerca de 79,72% da variância total dos dados padronizados. Se pegarmos as duas primeiras componentes principais, conseguimos atingir 93,93% da variância total.  
+
+```{r}
+plot(1:6, cp6$sdev^2, type = "b", xlab = "Componente",
+ ylab = "Variância", pch = 20, cex.axis = 1.3, cex.lab = 1.3)
+
+```
+
+A seguir estão as correlações entre os dois primeiros componentes principais e as variáveis:  
+
+```{r}
+cp6$sdev[1:2]*t(cp6$rotation[,1:2])
+```
+
+O primeiro componente tem correlação forte com todas as variáveis, menos PC que possui correlação fraca. Notemos que da 3º temporada até a 6º, as correlações entre as componentes principais e as variáveis mantiveram-se negativas.  
+
+# Índice W  
+
+Temos que o índice W é calculado sendo:  
+$$W = \frac{(\lambda_1)}{(\lambda_1 + \lambda_2)}Y1 + \frac{(\lambda_2)}{(\lambda_1 + \lambda_2)}Y2 $$  
+
+### Função para calcular os índices W:  
+
+```{r}
+W = function(x,CP,a){
+  if (a == 0 ){
+    y1 = -1*x*CP$rotation[,1] 
+   y2 = -1*x*CP$rotation[,2]
+  }else {
+    y1 = x*CP$rotation[,1] 
+  y2 = x*CP$rotation[,2]   
+   }
+
+  lambda1 = CP$sdev[1]/(CP$sdev[1]+CP$sdev[2])
+  lambda2 = CP$sdev[2]/(CP$sdev[1]+CP$sdev[2])
+  w1 = lambda1*y1 + lambda2*y2
+  W = apply(w1,1,sum)
+  cbind(x,W)
+}
+
+```
+
+### Aplicando W em cada tabela
+
+```{r}
+W1 = W(T1,cp1,1)
+  W2 = W(T2,cp2,1)
+  W3 = W(T3,cp3,0)
+  W4 = W(T4,cp4,0)
+  W5 = W(T5,cp5,0)
+  W6 = W(T6,cp6,0)
+
+kable(W1, caption = 'Temporada 1')
+kable(W2, caption = 'Até Temporada 2')
+kable(W3, caption = 'Até Temporada 3')
+kable(W4, caption = 'Até Temporada 4')
+kable(W5, caption = 'Até Temporada 5')
+kable(W6, caption = 'Até Temporada 6')
+
+```
+
+
+# Gráfico de evolução
+
+
+### Salvando as tabelas obtidas  
+
+```{r}
+write.table(W1, "T1.txt")
+write.table(W2, "T2.txt")
+write.table(W3, "T3.txt")
+write.table(W4, "T4.txt")
+write.table(W5, "T5.txt")
+write.table(W6, "T6.txt")
+
+#T1 = read.table("T1", header = T)
+#T2 = read.table("T2", header = T)
+#T3 = read.table("T3", header = T)
+#T4 = read.table("T4", header = T)
+#T5 = read.table("T5.txt", header = T)
+#T6 = read.table("T6.txt", header = T)
+
+```
+
+### Montando o gráfico  
+
+```{r}
+#Arrumando os dados para o plot
+wtodos = rbind(W1[,7], W2[,7], W3[,7], W4[,7], W5[,7], W6[,7])
+Dados = melt(wtodos)
+colnames(Dados) = c("Temporada", "Equipes", "W")
+Dados$Temporada = factor(Dados$Temporada)
+
+```
+
+```{r}
+#Plotando
+ggplot(Dados, aes(x = Temporada, y = W, fill = Equipes,  colour=Equipes))  +
+  geom_line(aes(group=Equipes))+
+  geom_point(aes(group=Equipes)) +
+  xlab("Temporada") +
+  ylab("Índice W") +
+  scale_colour_discrete()
+```
+
+Vemos que o maior campeão, que é Bayern de Munique (5 vitórias de 6 campeonatos), se destaca no Índice W, apenas é uma queda no seu índice no ano em que ele não foi campeão, porém os seus resultados só foram melhorando o que fez com que ele tivesse uma distância boa dos resultados das demais equipes competidoras
